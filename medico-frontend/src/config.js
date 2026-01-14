@@ -1,7 +1,7 @@
 // API Configuration
 // In production, set REACT_APP_API_URL environment variable to your backend URL
 // Example: REACT_APP_API_URL=https://medico-backend.onrender.com
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8001';
 
 // Med Backend URL (for medical assistant features)
 // Set REACT_APP_MED_API_URL in production

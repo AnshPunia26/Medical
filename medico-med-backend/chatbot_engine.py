@@ -618,49 +618,49 @@ Assistant:"""
                 print(f"[SAVE] ⚡ ATTEMPTING TO SAVE {len(all_answers_by_question)} Q&A pairs for user: {user_email}")
                     
                 # Store in temporary storage first (ensures nothing is lost)
-                        if user_email not in self.temp_qa_storage:
-                            self.temp_qa_storage[user_email] = {}
-                        self.temp_qa_storage[user_email].update(all_answers_by_question)
+                if user_email not in self.temp_qa_storage:
+                    self.temp_qa_storage[user_email] = {}
+                self.temp_qa_storage[user_email].update(all_answers_by_question)
                 print(f"[TEMP] Stored {len(all_answers_by_question)} Q&A pairs in temp storage (total: {len(self.temp_qa_storage[user_email])})")
                     
                 # Save to MongoDB
-                        try:
-                            from mongodb_service import mongodb_service as mongo_svc
-                            if mongo_svc and mongo_svc.responses_collection is not None:
+                try:
+                    from mongodb_service import mongodb_service as mongo_svc
+                    if mongo_svc and mongo_svc.responses_collection is not None:
                         # Use all Q&A pairs from temp storage (includes previous + new)
-                                all_qa_to_save = self.temp_qa_storage.get(user_email, all_answers_by_question)
-                                print(f"[SAVE] Saving {len(all_qa_to_save)} Q&A pairs to MongoDB...")
-                                
-                                saved = mongo_svc.save_user_responses(user_email, session_id, all_qa_to_save)
-                                
-                                if saved:
-                                    save_status = "saved"
+                        all_qa_to_save = self.temp_qa_storage.get(user_email, all_answers_by_question)
+                        print(f"[SAVE] Saving {len(all_qa_to_save)} Q&A pairs to MongoDB...")
+                        
+                        saved = mongo_svc.save_user_responses(user_email, session_id, all_qa_to_save)
+                        
+                        if saved:
+                            save_status = "saved"
                             print(f"[OK] ✓✓✓ SAVED {len(all_qa_to_save)} Q&A pairs to user document '{user_email}' ✓✓✓")
-                                else:
-                                    save_status = "failed"
+                        else:
+                            save_status = "failed"
                             print(f"[ERROR] ✗✗✗ SAVE FAILED for user '{user_email}' ✗✗✗")
-                            else:
+                    else:
                         save_status = "no_mongodb"
-                                print(f"[ERROR] MongoDB service or collection is None")
+                        print(f"[ERROR] MongoDB service or collection is None")
                 except ImportError as e:
                     save_status = "no_mongodb"
                     print(f"[ERROR] MongoDB service not available: {e}")
-                        except Exception as e:
+                except Exception as e:
                     save_status = "failed"
                     print(f"[ERROR] Exception saving to MongoDB: {e}")
-                            import traceback
-                            traceback.print_exc()
+                    import traceback
+                    traceback.print_exc()
                         
                 # Store save status in session state
-                        if "save_status" not in session_state:
-                            session_state["save_status"] = []
-                        session_state["save_status"].append({
-                            "status": save_status,
-                            "count": len(all_answers_by_question),
-                            "timestamp": datetime.now().isoformat()
-                        })
+                if "save_status" not in session_state:
+                    session_state["save_status"] = []
+                session_state["save_status"].append({
+                    "status": save_status,
+                    "count": len(all_answers_by_question),
+                    "timestamp": datetime.now().isoformat()
+                })
             elif all_answers_by_question and not user_email:
-                        save_status = "no_email"
+                save_status = "no_email"
                 print(f"[WARN] ⚠️  No user email provided - answers NOT saved. User must be logged in.")
             elif not all_answers_by_question:
                 print(f"[INFO] No valid Q&A pairs to save")

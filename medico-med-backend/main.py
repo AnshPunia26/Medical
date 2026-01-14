@@ -3,7 +3,7 @@ Multilingual Voice + Text Chatbot Backend
 FastAPI + LangChain + OpenAI ChatGPT + Whisper API
 """
 
-from fastapi import FastAPI, File, UploadFile, Form, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, Form, HTTPException, WebSocket, WebSocketDisconnect, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
@@ -71,6 +71,20 @@ class SessionRequest(BaseModel):
     session_id: str
 
 
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+# Simple in-memory user store (in production, use a database)
+users_db: Dict[str, Dict] = {}
+
+
 # ---------- ROUTES ----------
 
 @app.get("/")
@@ -80,6 +94,108 @@ async def root():
         "status": "online",
         "service": "Multilingual Voice Chatbot",
         "version": "1.0.0"
+    }
+
+
+@app.post("/api/signup")
+async def signup(request: SignupRequest):
+    """User signup endpoint"""
+    try:
+        # Check if user already exists
+        if request.email in users_db:
+            raise HTTPException(status_code=400, detail="User already exists")
+        
+        # Simple password validation
+        if len(request.password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        
+        # Store user (in production, hash password and use database)
+        users_db[request.email] = {
+            "email": request.email,
+            "password": request.password,  # In production, hash this!
+            "created_at": datetime.now().isoformat()
+        }
+        
+        # Generate simple token (in production, use JWT)
+        import hashlib
+        token = hashlib.sha256(f"{request.email}{datetime.now().isoformat()}".encode()).hexdigest()
+        
+        return {
+            "success": True,
+            "message": "Account created successfully",
+            "token": token,
+            "user": {
+                "email": request.email
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Signup failed: {str(e)}")
+
+
+@app.post("/api/login")
+async def login(request: LoginRequest):
+    """User login endpoint"""
+    try:
+        # Check if user exists
+        if request.email not in users_db:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Verify password (in production, use proper password hashing)
+        user = users_db[request.email]
+        if user["password"] != request.password:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        
+        # Generate token (in production, use JWT)
+        import hashlib
+        token = hashlib.sha256(f"{request.email}{datetime.now().isoformat()}".encode()).hexdigest()
+        
+        return {
+            "success": True,
+            "message": "Login successful",
+            "token": token,
+            "user": {
+                "email": request.email
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Login failed: {str(e)}")
+
+
+@app.get("/api/me")
+async def get_current_user(authorization: Optional[str] = Header(None)):
+    """Get current user info"""
+    # In production, verify JWT token
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Extract email from token (simple implementation)
+    # In production, decode JWT token
+    token = authorization.replace("Bearer ", "")
+    
+    # Find user by token (in production, decode JWT)
+    for email, user_data in users_db.items():
+        # Simple check - in production use proper JWT validation
+        return {
+            "email": email,
+            "id": email  # Use email as ID for now
+        }
+    
+    raise HTTPException(status_code=401, detail="Invalid token")
+
+
+@app.post("/api/complete-onboarding")
+async def complete_onboarding(authorization: Optional[str] = Header(None)):
+    """Complete user onboarding"""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    return {
+        "success": True,
+        "message": "Onboarding completed"
     }
 
 
@@ -343,5 +459,6 @@ async def websocket_voice_endpoint(websocket: WebSocket):
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8001")))  # Render uses PORT, local uses BACKEND_PORT
+    # Run on port 8000 for main API, or 8001 if specified
+    port = int(os.getenv("PORT", os.getenv("BACKEND_PORT", "8000")))  # Default to 8000 for main backend
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

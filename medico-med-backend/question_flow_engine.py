@@ -50,6 +50,8 @@ class QuestionFlowEngine:
         self.questions_data = self._load_questions()
         # Flatten the nested structure into a flat questions map with labels as keys
         self.questions = self._flatten_questions()
+        # Store original question order from JSON for proper sequencing
+        self.questions_list_ordered = self.questions_data.get("questions", [])
         
         # Handle dependencies and priorities for both old and new structures
         if self.questions_data.get("question_dependencies"):
@@ -228,6 +230,8 @@ class QuestionFlowEngine:
             }
             
             # Group questions by category and assign labels
+            # Use global counter to ensure unique labels
+            global_q_num = 0
             category_counts = {}
             for q in questions_list:
                 old_id = q.get("id", "")
@@ -246,13 +250,13 @@ class QuestionFlowEngine:
                 # Assign subcategory label
                 subcat_label = category_counts[category]["subcat"]
                 category_counts[category]["count"] += 1
+                global_q_num += 1
                 
-                # Create question label (AA_1, AA_2, etc.)
-                q_num = category_counts[category]["count"]
-                question_label = f"{subcat_label}_{q_num}"
+                # Create question label (AA_1, AA_2, etc.) using global counter for uniqueness
+                question_label = f"{subcat_label}_{global_q_num}"
                 
-                # Move to next subcategory if needed (every 5 questions or when category changes)
-                if category_counts[category]["count"] % 5 == 0:
+                # Move to next subcategory if needed (every 5 questions in same category)
+                if category_counts[category]["count"] % 5 == 0 and category_counts[category]["count"] > 0:
                     # Increment subcategory (AA -> AB -> AC, etc.)
                     subcat_letter = ord(subcat_label[1]) + 1
                     if subcat_letter > ord('Z'):
@@ -280,8 +284,8 @@ class QuestionFlowEngine:
     
     def _get_available_questions(self, answered_questions: Set[str]) -> List[Dict]:
         """Get questions that can be asked (dependencies satisfied)"""
-        # TESTING: Limit to 2 questions for now
-        MAX_QUESTIONS = 2
+        # Limit to 6 questions
+        MAX_QUESTIONS = 6
         
         # Ensure answered_questions is a set
         if isinstance(answered_questions, list):
@@ -293,29 +297,57 @@ class QuestionFlowEngine:
             return []
         
         available = []
-        for question_label, question_data in self.questions.items():
+        # Iterate through questions in JSON file order (not dictionary order)
+        for q in self.questions_list_ordered:
+            old_id = q.get("id", "")
+            # Find the corresponding label in self.questions
+            question_label = None
+            for label, q_data in self.questions.items():
+                if q_data.get("old_id") == old_id:
+                    question_label = label
+                    break
+            
+            if not question_label:
+                continue
+            
             # Skip if already answered
             if question_label in answered_questions:
                 continue
             
-            # Check if dependencies are satisfied
-            deps = self.dependencies.get(question_label, [])
-            if all(dep in answered_questions for dep in deps):
+            # Check if dependencies are satisfied (using old_id for dependencies)
+            deps = q.get("dependencies", [])
+            # Convert old_id dependencies to new labels
+            deps_satisfied = True
+            for dep_old_id in deps:
+                # Find label for dependency
+                dep_label = None
+                for label, q_data in self.questions.items():
+                    if q_data.get("old_id") == dep_old_id:
+                        dep_label = label
+                        break
+                if dep_label and dep_label not in answered_questions:
+                    deps_satisfied = False
+                    break
+            
+            if deps_satisfied:
+                question_data = self.questions[question_label]
                 # Create question dict with label as id for compatibility
                 q_dict = {
                     "id": question_label,  # Use label as id internally
                     "question": question_data["question"],
                     "category": question_data["category"],
                     "subcategory": question_data["subcategory"],
-                    "label": question_label
+                    "label": question_label,
+                    "old_id": old_id  # Keep old_id for reference
                 }
                 available.append(q_dict)
                 
-                # TESTING: Stop after finding MAX_QUESTIONS available questions
+                # Stop after finding MAX_QUESTIONS available questions
                 if len(available) >= MAX_QUESTIONS:
                     break
         
         print(f"[TEST] Available questions: {len(available)} (answered: {len(answered_questions)}, MAX: {MAX_QUESTIONS})")
+        # Questions are already in JSON order, no need to sort
         return available
     
     def _sort_questions_by_order(self, questions: List[Dict]) -> List[Dict]:
@@ -352,19 +384,15 @@ class QuestionFlowEngine:
     ) -> Optional[str]:
         """
         Select next question following strict order from questions.json
-        Order: personal_info → medical_history → symptoms → additional_info
-        Follows file order strictly as per medical assistant requirements
+        Questions are already in JSON file order from _get_available_questions
         """
         if not available_questions:
             return None
         
-        # Sort available questions using the proper order function
-        sorted_questions = self._sort_questions_by_order(available_questions)
-        
-        if sorted_questions:
-            # Return the first question in the sorted order (strict file order)
-            selected_id = sorted_questions[0]["id"]  # This is the label (AA_1, BA_2, etc.)
-            selected_q = sorted_questions[0]
+        # Questions are already in JSON order, just return the first one
+        # Return the first question (already in correct order from JSON file)
+            selected_id = available_questions[0]["id"]  # This is the label (AA_1, BA_2, etc.)
+            selected_q = available_questions[0]
             priority = self.priorities.get(selected_id, 0)
             print(f"\n{'='*80}")
             print(f"🎯 SELECTED NEXT QUESTION: {selected_id}")
@@ -470,11 +498,10 @@ class QuestionFlowEngine:
             print(f"   This should not happen - question selection logic has a bug")
             print(f"   Answered set: {list(answered)}")
             print(f"   Available questions: {[q['id'] for q in available]}")
-            # Remove from available and select next using proper sorting
+            # Remove from available and select next (already in JSON order)
             available = [q for q in available if q["id"] != selected_id]
             if available:
-                sorted_questions = self._sort_questions_by_order(available)
-                selected_id = sorted_questions[0]["id"]
+                selected_id = available[0]["id"]  # Already in JSON order
                 print(f"   Fixed: Selected next question: {selected_id}")
             else:
                 selected_id = None
@@ -484,11 +511,10 @@ class QuestionFlowEngine:
             state["current_question_id"] = selected_id
             print(f"✓ Selected next question: {selected_id} - {self.questions[selected_id]['question'][:60]}...")
         else:
-            # Fallback to first available using proper sorting
-            sorted_questions = self._sort_questions_by_order(available)
-            if sorted_questions:
-                state["current_question_id"] = sorted_questions[0]["id"]
-                print(f"✓ Fallback selected question: {state['current_question_id']} - {sorted_questions[0]['question'][:60]}...")
+            # Fallback to first available (already in JSON order)
+            if available:
+                state["current_question_id"] = available[0]["id"]  # Already in JSON order
+                print(f"✓ Fallback selected question: {state['current_question_id']} - {available[0]['question'][:60]}...")
             else:
                 state["current_question_id"] = None
                 state["flow_complete"] = True
@@ -655,21 +681,56 @@ class QuestionFlowEngine:
         # Check if this is the first interaction (no questions answered yet AND no current question)
         # CRITICAL: If we have a current_question_id, we're answering a question, not starting fresh
         current_q_id_from_state = session_state.get("current_question_id")
-        is_first_interaction = len(answered_questions) == 0 and current_q_id_from_state is None
+        has_answers = len(session_state.get("answers", {})) > 0
+        has_asked_questions = len(session_state.get("asked_questions", set())) > 0
+        is_first_interaction = (len(answered_questions) == 0 and 
+                               current_q_id_from_state is None and 
+                               not has_answers and 
+                               not has_asked_questions)
         
-        print(f"🔍 First interaction check: answered_count={len(answered_questions)}, current_q_id={current_q_id_from_state}, is_first={is_first_interaction}")
+        print(f"\n{'='*80}")
+        print(f"🔍 FIRST INTERACTION CHECK")
+        print(f"   answered_count: {len(answered_questions)}")
+        print(f"   current_q_id: {current_q_id_from_state}")
+        print(f"   has_answers: {has_answers}")
+        print(f"   has_asked_questions: {has_asked_questions}")
+        print(f"   is_first_interaction: {is_first_interaction}")
+        print(f"{'='*80}\n")
         
-        # If first interaction, immediately start structured consultation
+        # If first interaction, skip the greeting (already shown in frontend) and ask first consultation question
         if is_first_interaction:
-            # Get the first question from questions.json (intro_1)
-            available = self._get_available_questions(set())
-            if available:
-                # Get first question by category order and priority
-                sorted_questions = self._sort_questions_by_order(available)
-                first_question = sorted_questions[0]
+            # Mark intro_1 (greeting) as already answered since it was shown in frontend
+            # Find intro_1 label by iterating through questions in JSON order
+            intro_1_label = None
+            for q in self.questions_list_ordered:
+                if q.get("id") == "intro_1":
+                    # Find the label for this question
+                    for label, q_data in self.questions.items():
+                        if q_data.get("old_id") == "intro_1":
+                            intro_1_label = label
+                            break
+                    break
+            
+            # Mark intro_1 as answered so demo_1 becomes available
+            answered_with_intro = set()
+            if intro_1_label:
+                answered_with_intro.add(intro_1_label)
+                session_state["answered_questions"] = answered_with_intro
+                session_state["answers"] = {intro_1_label: "greeting_shown"}  # Mark greeting as shown
+                print(f"✓ Marked intro_1 ({intro_1_label}) as answered (greeting shown in frontend)")
+            
+            # Get available questions (will be in JSON order)
+            # Now demo_1 should be available since intro_1 is marked as answered
+            available = self._get_available_questions(answered_with_intro)
+            print(f"✓ Available questions after marking intro_1: {[q.get('old_id', q.get('id')) for q in available[:3]]}")
+            
+            if available and len(available) > 0:
+                # Get the first available question (should be demo_1 - age, in JSON order)
+                first_question = available[0]
                 question_text = first_question["question"]
+                print(f"✓ First consultation question: {first_question.get('old_id', first_question.get('id'))} - {question_text[:60]}...")
                 
-                print(f"✓ First question selected: {first_question['id']} - {question_text[:60]}...")
+                print(f"✓ First consultation question selected: {first_question['id']} - {question_text[:60]}...")
                 
                 # Update session state
                 session_state["messages"] = session_state.get("messages", []) + [
@@ -715,9 +776,13 @@ class QuestionFlowEngine:
         # For subsequent interactions, process the answer and ask next question
         # IMPORTANT: Get the current_question_id from session state (the question that was just asked)
         current_q_id = session_state.get("current_question_id")
-        print(f"📝 Processing answer for question: {current_q_id}, User message: {user_message[:50]}...")
-        print(f"📊 Current answered questions: {list(answered_questions)}")
-        print(f"📊 Current answers in session: {list(session_state.get('answers', {}).keys())}")
+        print(f"\n{'='*80}")
+        print(f"📝 PROCESSING ANSWER (NOT FIRST INTERACTION)")
+        print(f"   Current question ID: {current_q_id}")
+        print(f"   User message: {user_message[:50]}...")
+        print(f"   Answered questions: {list(answered_questions)}")
+        print(f"   Answers in session: {list(session_state.get('answers', {}).keys())}")
+        print(f"{'='*80}\n")
         
         # CRITICAL: If we have a current question ID, mark it as answered BEFORE processing
         # This ensures the question won't be selected again
@@ -758,59 +823,78 @@ class QuestionFlowEngine:
         
         try:
             # Get current state from LangGraph memory if exists
-            try:
-                current_state = self.workflow.get_state(config)
-                if current_state and current_state.values:
-                    # Merge with existing state from LangGraph memory
-                    existing = current_state.values
-                    # CRITICAL: Merge answered questions - don't overwrite, merge sets
-                    if existing.get("answered_questions"):
-                        existing_answered = existing["answered_questions"]
-                        if isinstance(existing_answered, set):
-                            existing_answered_set = existing_answered
-                        elif isinstance(existing_answered, list):
-                            existing_answered_set = set(existing_answered)
+            # BUT: For first interaction, ignore LangGraph memory completely and use fresh state
+            if is_first_interaction:
+                print(f"🔄 First interaction - ignoring LangGraph memory completely, using fresh state")
+                # Use fresh state - don't load from LangGraph memory at all
+                langgraph_state = initial_state
+                # Clear any existing state in LangGraph for this thread
+                try:
+                    self.workflow.get_state(config)
+                    # If state exists, we could clear it, but for now just use fresh state
+                except:
+                    pass
+            else:
+                try:
+                    current_state = self.workflow.get_state(config)
+                    if current_state and current_state.values:
+                        # Merge with existing state from LangGraph memory
+                        existing = current_state.values
+                        # CRITICAL: Merge answered questions - don't overwrite, merge sets
+                        if existing.get("answered_questions"):
+                            existing_answered = existing["answered_questions"]
+                            if isinstance(existing_answered, set):
+                                existing_answered_set = existing_answered
+                            elif isinstance(existing_answered, list):
+                                existing_answered_set = set(existing_answered)
+                            else:
+                                existing_answered_set = set()
+                            # Merge with current answered questions
+                            answered_questions = answered_questions.union(existing_answered_set)
+                            initial_state["answered_questions"] = answered_questions
+                            print(f"✓ Merged answered questions: {list(answered_questions)}")
+                        # Preserve answers from memory - merge, don't overwrite
+                        if existing.get("answers"):
+                            # Merge answers - current answers take precedence
+                            merged_answers = {**existing["answers"], **initial_state.get("answers", {})}
+                            initial_state["answers"] = merged_answers
+                            # Ensure all answers in merged_answers are in answered_questions
+                            for q_id in merged_answers.keys():
+                                answered_questions.add(q_id)
+                            initial_state["answered_questions"] = answered_questions
+                            print(f"✓ Merged answers: {list(merged_answers.keys())}")
+                        # Preserve question embeddings
+                        if existing.get("question_embeddings"):
+                            initial_state["question_embeddings"] = {**existing["question_embeddings"], **initial_state.get("question_embeddings", {})}
+                        # CRITICAL: Preserve current question ID from initial_state (the question being answered)
+                        # Don't overwrite it with existing state - we want to process the answer to the current question
+                        # Only use existing if we don't have one (shouldn't happen, but safety check)
+                        if not initial_state.get("current_question_id") and existing.get("current_question_id"):
+                            print(f"⚠ Using existing current_question_id from memory: {existing.get('current_question_id')}")
+                            initial_state["current_question_id"] = existing["current_question_id"]
                         else:
-                            existing_answered_set = set()
-                        # Merge with current answered questions
-                        answered_questions = answered_questions.union(existing_answered_set)
+                            print(f"✓ Preserving current_question_id from initial_state: {initial_state.get('current_question_id')}")
+                        # Preserve messages from memory
+                        if existing.get("messages"):
+                            initial_state["messages"] = existing["messages"] + [HumanMessage(content=user_message)]
+                        else:
+                            initial_state["messages"] = [HumanMessage(content=user_message)]
                         initial_state["answered_questions"] = answered_questions
-                        print(f"✓ Merged answered questions: {list(answered_questions)}")
-                    # Preserve answers from memory - merge, don't overwrite
-                    if existing.get("answers"):
-                        # Merge answers - current answers take precedence
-                        merged_answers = {**existing["answers"], **initial_state.get("answers", {})}
-                        initial_state["answers"] = merged_answers
-                        # Ensure all answers in merged_answers are in answered_questions
-                        for q_id in merged_answers.keys():
-                            answered_questions.add(q_id)
-                        initial_state["answered_questions"] = answered_questions
-                        print(f"✓ Merged answers: {list(merged_answers.keys())}")
-                    # Preserve question embeddings
-                    if existing.get("question_embeddings"):
-                        initial_state["question_embeddings"] = {**existing["question_embeddings"], **initial_state.get("question_embeddings", {})}
-                    # CRITICAL: Preserve current question ID from initial_state (the question being answered)
-                    # Don't overwrite it with existing state - we want to process the answer to the current question
-                    # Only use existing if we don't have one (shouldn't happen, but safety check)
-                    if not initial_state.get("current_question_id") and existing.get("current_question_id"):
-                        print(f"⚠ Using existing current_question_id from memory: {existing.get('current_question_id')}")
-                        initial_state["current_question_id"] = existing["current_question_id"]
+                        print(f"✓ Loaded state from LangGraph memory: {len(answered_questions)} questions answered")
+                        langgraph_state = initial_state
                     else:
-                        print(f"✓ Preserving current_question_id from initial_state: {initial_state.get('current_question_id')}")
-                    # Preserve messages from memory
-                    if existing.get("messages"):
-                        initial_state["messages"] = existing["messages"] + [HumanMessage(content=user_message)]
-                    else:
-                        initial_state["messages"] = [HumanMessage(content=user_message)]
-                    initial_state["answered_questions"] = answered_questions
-                    print(f"✓ Loaded state from LangGraph memory: {len(answered_questions)} questions answered")
-            except Exception as e:
-                print(f"⚠ No existing state in LangGraph memory, starting fresh: {e}")
-                # No existing state, use initial_state as is
-                initial_state["messages"] = [HumanMessage(content=user_message)]
+                        # No existing state, use initial_state as is
+                        langgraph_state = initial_state
+                        langgraph_state["messages"] = [HumanMessage(content=user_message)]
+                except Exception as e:
+                    print(f"⚠ No existing state in LangGraph memory, starting fresh: {e}")
+                    # No existing state, use initial_state as is
+                    langgraph_state = initial_state
+                    langgraph_state["messages"] = [HumanMessage(content=user_message)]
             
             # Run workflow with checkpointing - state will be saved automatically
-            final_state = await self.workflow.ainvoke(initial_state, config)
+            # Use langgraph_state (which is either initial_state for first interaction, or merged state)
+            final_state = await self.workflow.ainvoke(langgraph_state, config)
             print(f"✓ Workflow completed, state saved to memory (thread_id: {thread_id_for_memory})")
             
             # Extract response

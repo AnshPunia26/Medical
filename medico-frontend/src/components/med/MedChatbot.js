@@ -13,10 +13,10 @@ import {
 } from 'react-icons/fi';
 import './MedChatbot.css';
 
-// Use main backend proxy for med API calls (proxied to med backend on 8001)
-// Note: WebSocket connections go directly to med backend (8001) as they can't be proxied
-const API_BASE_URL = process.env.REACT_APP_MED_API_URL || 'http://localhost:8000/api/med';
-const MED_BACKEND_DIRECT = process.env.REACT_APP_MED_BACKEND_DIRECT || 'http://localhost:8001';
+// Use main backend for med API calls (same backend on port 8000)
+// Note: WebSocket connections go directly to backend
+const API_BASE_URL = process.env.REACT_APP_MED_API_URL || 'http://localhost:8000/api/chat';
+const MED_BACKEND_DIRECT = process.env.REACT_APP_MED_BACKEND_DIRECT || 'http://localhost:8000';
 const WS_BASE_URL = MED_BACKEND_DIRECT.replace('http', 'ws');
 
 function MedChatbot() {
@@ -41,6 +41,17 @@ function MedChatbot() {
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const silenceTimeoutRef = useRef(null);
+
+  // Show greeting message when component mounts
+  useEffect(() => {
+    const greetingMessage = {
+      role: 'assistant',
+      content: 'Hello! I\'m your Medical Assistant. I\'ll be conducting a structured consultation to better understand your health concerns. This will help me provide you with appropriate guidance. Please note that this is for informational purposes only and does not replace professional medical diagnosis. Are you ready to begin?',
+      timestamp: new Date().toISOString(),
+      language: 'en'
+    };
+    setMessages([greetingMessage]);
+  }, []);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -88,7 +99,7 @@ function MedChatbot() {
       // Get username from localStorage (set during login)
       const username = localStorage.getItem('userEmail') || localStorage.getItem('username') || null;
       
-      const response = await axios.post(`${API_BASE_URL}/chat/text`, {
+      const response = await axios.post(`${API_BASE_URL}/text`, {
         message: messageToSend,
         session_id: sessionId,
         language: currentLanguage,
